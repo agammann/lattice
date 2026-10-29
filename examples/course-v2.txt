@@ -1,0 +1,5 @@
+Introduction: abc.
+First fact: amber.
+Second fact: cyan.
+Third fact: lime.
+Conclusion: done.

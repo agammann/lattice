@@ -1,0 +1,5 @@
+Introduction: abc.
+First fact: red.
+Second fact: blue.
+Third fact: green.
+Conclusion: done.
