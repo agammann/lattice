@@ -5,16 +5,101 @@
 </style></head><body><header><h1>Lattice</h1><p>Source evidence for lessons and guides</p></header><main><div class="intro"><div><h2>Review dependencies</h2><div class="muted">Track the passages behind your work. A change is a prompt to review, not a verdict.</div></div><button class="secondary" id="export">Export evidence</button></div><div id="notice" role="alert" hidden></div><div class="layout"><aside><section class="panel"><h3>1. Import a source</h3><p class="muted">Paste text or open a UTF-8 text file. Reuse the name to add a new version.</p><form id="import"><label for="source-name">Source name</label><input id="source-name" required><label for="file">Text file (optional)</label><input id="file" type="file" accept=".txt,text/plain"><label for="source-text">Source text</label><textarea id="source-text" required></textarea><button>Save source version</button></form><p class="muted"><small>PDF and HTML files are not supported in this screen. The CLI supports basic HTML extraction.</small></p></section><section class="panel"><h3>2. Add a card</h3><p class="muted">Select a source and copy a unique passage from it.</p><form id="card"><label for="source-select">Source</label><select id="source-select" required></select><details><summary>View latest source</summary><div class="source-text" id="source-preview"></div></details><label for="title">Card title</label><input id="title" required><label for="body">Lesson or guide text</label><textarea id="body" required></textarea><label for="passage">Exact source passage</label><textarea id="passage" required></textarea><button>Add dependency</button></form></section></aside><section><div class="queuehead"><div><h3>Review queue</h3><div class="muted" id="count"></div></div><label for="filter">Show <select id="filter"><option value="all">All cards</option><option>changed</option><option>unresolvable</option><option>unchanged</option></select></label></div><div id="queue"></div></section></div></main>
 <script>
 const token='__TOKEN__'; let state={queue:[],sources:[]}; const $=id=>document.getElementById(id); const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const editDrafts = new Map();
+const reviewDrafts = new Map();
+const pendingSaves = new Set();
 function notice(msg,error=false){let el=$('notice');el.hidden=!msg;el.className='notice';el.textContent=msg; if(!error)el.style.cssText='background:#e1f2e6;color:#205b3b';else el.style.cssText=''}
 async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Lattice-Token':token},body:JSON.stringify(data)});let j=await r.json();if(!r.ok)throw Error(j.error);return j}
 async function refresh(){let r=await fetch('/api/state');state=await r.json();let old=$('source-select').value;$('source-select').innerHTML=state.sources.map(s=>`<option value="${esc(s.name)}">${esc(s.name)} · v${s.id}</option>`).join('');if(state.sources.some(s=>s.name===old))$('source-select').value=old; preview();render()}
 function preview(){$('source-preview').textContent=state.sources.find(s=>s.name===$('source-select').value)?.text||'Import a source first.'}
-function render(){let q=state.queue.filter(x=>$('filter').value==='all'||x.status===$('filter').value);$('count').textContent=`${state.queue.length} dependencies · ${state.queue.filter(x=>x.status!=='unchanged'&&!x.review).length} awaiting review`;if(!q.length){$('queue').innerHTML='<div class="empty">No cards to show. Import a source and add a dependency to begin.</div>';return}$('queue').innerHTML=q.map(x=>`<article class="item" data-edge="${x.edge}"><div class="itemhead"><div><h4>${esc(x.title)}</h4><div class="muted">${esc(x.source)} · baseline v${x.baseline_version} → latest v${x.latest_version}</div></div><span class="status ${x.status}">${x.status}</span></div><div class="body">${esc(x.body)}</div><div class="evidence"><div><strong>Original passage</strong>${esc(x.old_passage)}</div><div><strong>Latest candidate</strong>${x.candidate===null?'Could not locate reliably':esc(x.candidate)||'(empty passage)'}</div></div>${x.review?`<div class="muted">Reviewed for v${x.latest_version}: ${esc(x.review.note)}</div>`:''}<details class="review"><summary>Review or edit card</summary><form class="edit"><label>Title<input name="title" required value="${esc(x.title)}"></label><label>Lesson or guide text<textarea name="body" required>${esc(x.body)}</textarea></label><button class="secondary">Save card edits</button></form><form class="ack"><label>Review note<textarea name="note" required placeholder="What did you check or change?"></textarea></label><button>Acknowledge version ${x.latest_version}</button></form></details></article>`).join('')}
+function render() {
+  const container = $('queue');
+  const filter = $('filter').value;
+  const rows = state.queue.filter(row => filter === 'all' || row.status === filter);
+  const openEdges = new Set([...container.querySelectorAll('details[open]')].map(section => Number(section.closest('article').dataset.edge)));
+  const pending = state.queue.filter(row => row.status !== 'unchanged' && !row.review).length;
+  $('count').textContent = `${state.queue.length} dependencies · ${pending} awaiting review`;
+
+  for (const row of state.queue) {
+    const review = reviewDrafts.get(row.edge);
+    if (review && review.version !== row.latest_version) reviewDrafts.delete(row.edge);
+  }
+  if (!rows.length) {
+    container.innerHTML = '<div class="empty">No cards to show. Import a source and add a dependency to begin.</div>';
+    return;
+  }
+  container.innerHTML = rows.map(row => `
+    <article class="item" data-edge="${row.edge}" data-version="${row.latest_version}">
+      <div class="itemhead"><div><h4>${esc(row.title)}</h4><div class="muted">${esc(row.source)} · baseline v${row.baseline_version} → latest v${row.latest_version}</div></div>
+        <span class="status ${row.status}">${row.status}</span>
+      </div>
+      <div class="body">${esc(row.body)}</div>
+      <div class="evidence"><div><strong>Original passage</strong>${esc(row.old_passage)}</div>
+        <div><strong>Latest candidate</strong>${row.candidate === null ? 'Could not locate reliably' : esc(row.candidate) || '(empty passage)'}</div>
+      </div>
+      ${row.review ? `<div class="muted">Reviewed for v${row.latest_version}: ${esc(row.review.note)}</div>` : ''}
+      <details class="review"${openEdges.has(row.edge) ? ' open' : ''}><summary>Review or edit card</summary>
+        <form class="edit"><label>Title<input name="title" required></label>
+          <label>Lesson or guide text<textarea name="body" required></textarea></label>
+          <button class="secondary"${pendingSaves.has(`${row.edge}:edit`) ? ' disabled' : ''}>Save card edits</button>
+        </form>
+        <form class="ack"><label>Review note<textarea name="note" required placeholder="What did you check or change?"></textarea></label>
+          <button${pendingSaves.has(`${row.edge}:ack`) ? ' disabled' : ''}>Acknowledge version ${row.latest_version}</button>
+        </form>
+      </details>
+    </article>`).join('');
+  container.querySelectorAll('article').forEach((card, index) => {
+    const row = rows[index];
+    const edit = editDrafts.get(row.edge) ?? row;
+    card.querySelector('input[name="title"]').value = edit.title;
+    card.querySelector('textarea[name="body"]').value = edit.body;
+    card.querySelector('textarea[name="note"]').value = reviewDrafts.get(row.edge)?.note ?? '';
+  });
+}
 $('source-select').onchange=preview;$('filter').onchange=render;
 $('file').onchange=async e=>{let f=e.target.files[0];if(f){if(f.size>1900000){notice('File exceeds the 2 MB limit.',true);return}$('source-text').value=await f.text()}};
 $('import').onsubmit=async e=>{e.preventDefault();try{await post('/api/import',{name:$('source-name').value,text:$('source-text').value});await refresh();notice('Source version saved.');}catch(e){notice(e.message,true)}};
 $('card').onsubmit=async e=>{e.preventDefault();try{await post('/api/card',{source:$('source-select').value,title:$('title').value,body:$('body').value,passage:$('passage').value});$('title').value='';$('body').value='';$('passage').value='';await refresh();notice('Dependency added.')}catch(e){notice(e.message,true)}};
-$('queue').onsubmit=async e=>{e.preventDefault();let form=e.target,edge=Number(form.closest('article').dataset.edge),row=state.queue.find(x=>x.edge===edge);try{if(form.classList.contains('edit'))await post('/api/edit',{edge,title:form.elements.title.value,body:form.elements.body.value});else await post('/api/review',{edge,version:row.latest_version,note:form.elements.note.value});await refresh();notice(form.classList.contains('edit')?'Card saved; previous text retained.':'Review recorded for this version.')}catch(e){notice(e.message,true)}};
+$('queue').oninput = event => {
+  const form = event.target.form;
+  if (!form) return;
+  const {edge, version} = form.closest('article').dataset;
+  if (form.classList.contains('edit')) {
+    editDrafts.set(Number(edge), {title: form.elements.title.value, body: form.elements.body.value});
+  } else {
+    reviewDrafts.set(Number(edge), {version: Number(version), note: form.elements.note.value});
+  }
+};
+$('queue').onsubmit = async event => {
+  event.preventDefault();
+  const form = event.target;
+  const card = form.closest('article');
+  const edge = Number(card.dataset.edge);
+  const editing = form.classList.contains('edit');
+  const drafts = editing ? editDrafts : reviewDrafts;
+  const submitted = drafts.get(edge);
+  const kind = editing ? 'edit' : 'ack';
+  const key = `${edge}:${kind}`;
+  if (pendingSaves.has(key)) return;
+  pendingSaves.add(key);
+  form.querySelector('button').disabled = true;
+  try {
+    if (editing) {
+      await post('/api/edit', {edge, title: form.elements.title.value, body: form.elements.body.value});
+    } else {
+      await post('/api/review', {edge, version: Number(card.dataset.version), note: form.elements.note.value});
+    }
+    if (drafts.get(edge) === submitted) drafts.delete(edge);
+    await refresh();
+    notice(editing ? 'Card saved; previous text retained.' : 'Review recorded for this version.');
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    pendingSaves.delete(key);
+    const current = $('queue').querySelector(`article[data-edge="${edge}"] .${kind} button`);
+    if (current) current.disabled = false;
+  }
+};
 $('export').onclick=async()=>{let r=await fetch('/api/export');let blob=new Blob([JSON.stringify(await r.json(),null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='lattice-evidence.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 refresh().catch(e=>notice(e.message,true));
 </script></body></html>
