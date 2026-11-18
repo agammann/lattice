@@ -21,6 +21,20 @@ class LatticeTests(unittest.TestCase):
  def test_duplicate_new_passage_is_unresolvable(self):
   self.add('red'); lattice.add_source(self.db,'course',self.old+' red')
   self.assertEqual(lattice.queue(self.db)[0]['status'],'unresolvable')
+ def test_overlapping_passages_are_not_unique_anchors(self):
+  lattice.add_source(self.db, 'spelling', 'Practice letters: anana.')
+  with self.assertRaisesRegex(ValueError, 'exactly once'):
+   lattice.add_card(self.db, 'spelling', 'Spelling drill', 'Fictional example', 'ana')
+  self.assertEqual(lattice.queue(self.db), [])
+
+ def test_new_overlapping_passage_or_boundary_is_unresolvable(self):
+  lattice.add_source(self.db, 'spelling', 'Practice letters: canary.')
+  lattice.add_card(self.db, 'spelling', 'Spelling drill', 'Fictional example', 'ana')
+  lattice.add_source(self.db, 'spelling', 'Practice letters: anana.')
+  row = lattice.queue(self.db)[0]
+  self.assertEqual((row['status'], row['candidate']), ('unresolvable', None))
+  self.assertEqual(lattice.classify('abaQz', 'ababaYz', 3, 4), ('unresolvable', None))
+
  def test_deleted_boundaries_unresolvable(self):
   self.add('red'); lattice.add_source(self.db,'course','completely different')
   self.assertEqual(lattice.queue(self.db)[0]['status'],'unresolvable')

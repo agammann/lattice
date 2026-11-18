@@ -39,27 +39,40 @@ def add_source(db,name,text):
     sid=db.execute('SELECT id FROM sources WHERE name=?',(name,)).fetchone()['id']
     with db: return db.execute('INSERT INTO versions(source_id,text) VALUES (?,?)',(sid,text)).lastrowid
 
+def unique_offset(text, passage):
+    if not passage:
+        return None
+    start = text.find(passage)
+    if start < 0 or text.find(passage, start + 1) >= 0:
+        return None
+    return start
+
 def add_card(db,source,title,body,quote):
     v=db.execute('SELECT v.* FROM versions v JOIN sources s ON s.id=v.source_id WHERE s.name=? ORDER BY v.id DESC LIMIT 1',(source,)).fetchone()
     if not v: raise ValueError('unknown source')
-    if not quote or v['text'].count(quote)!=1: raise ValueError('passage must occur exactly once in the latest source')
-    start=v['text'].index(quote)
+    start = unique_offset(v['text'], quote)
+    if start is None:
+        raise ValueError('passage must occur exactly once in the latest source')
     with db:
         card=db.execute('INSERT INTO cards(title,body) VALUES (?,?)',(title,body)).lastrowid
         return db.execute('INSERT INTO edges(card_id,version_id,start,end,quote) VALUES (?,?,?,?,?)',(card,v['id'],start,start+len(quote),quote)).lastrowid
 
 def classify(old,new,start,end):
-    # Map only a contiguous equal region; ambiguous repeated exact quotes cannot be relocated safely.
-    quote=old[start:end]
-    if old==new: return 'unchanged', quote
-    if new.count(quote)==1: return 'unchanged', quote
-    if new.count(quote)>1: return 'unresolvable', None
+    quote = old[start:end]
+    if old == new:
+        return 'unchanged', quote
+    if quote in new:
+        if unique_offset(new, quote) is not None:
+            return 'unchanged', quote
+        return 'unresolvable', None
 
-    # Use equal text on both sides as boundaries. Only unique boundaries permit a changed candidate.
-    left=next((old[start-n:start] for n in range(1,min(start,32)+1) if new.count(old[start-n:start])==1), ""); right=next((old[end:end+n] for n in range(1,min(len(old)-end,32)+1) if new.count(old[end:end+n])==1), "")
-    if left and right and new.count(left)==1 and new.count(right)==1:
-        a=new.index(left)+len(left); b=new.index(right)
-        if a<=b: return 'changed', new[a:b]
+    # Use the nearest unique matching text on each side of the original passage.
+    left = (old[start-size:start] for size in range(1, min(start, 32) + 1))
+    right = (old[end:end+size] for size in range(1, min(len(old)-end, 32) + 1))
+    before = next((offset + len(probe) for probe in left if (offset := unique_offset(new, probe)) is not None), None)
+    after = next((offset for probe in right if (offset := unique_offset(new, probe)) is not None), None)
+    if before is not None and after is not None and before <= after:
+        return 'changed', new[before:after]
     return 'unresolvable', None
 
 def queue(db):

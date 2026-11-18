@@ -1,14 +1,22 @@
 # Lattice
 
-A local-first **alpha research prototype** for tracking which authored cards depend on source passages. Import a text or HTML source, anchor a card to a unique passage, import a new version, and inspect evidence for review. No account, network, model, or third-party package is required. This is not proof of market fit or a safety assessment.
+Lattice helps authors track the source passages behind lessons and guides. Import a source, anchor a card to a unique passage, and compare the evidence when you import a revision. Lattice stores source versions, cards, and review history in a local SQLite file. It needs Python 3.10 or newer and uses only the standard library.
 
 ## Local review screen
 
-Run `python app.py` and visit `http://127.0.0.1:8765`. Stop it with Ctrl+C. The server listens only on loopback; use it on a trusted computer and do not expose it to a network. It uses a session token and checks the loopback host, but is not designed for multi-user hosting. Paste text or select a UTF-8 text file, add a card using an exact unique passage, then import a new version under the same source name. Review the queue, edit the card, acknowledge the displayed version, or export evidence. The UI preserves prior card text and review notes. The UI does not import HTML or PDF; the CLI supports basic HTML extraction. The server limits requests to 2 MB.
+Run `python app.py` from this directory, then open `http://127.0.0.1:8765` in a browser on the same computer. Stop the server with Ctrl+C. The server binds to loopback on a trusted computer. Local use is single-user. The default database is `lattice.sqlite3` in the directory where you run the command. Use `python app.py --db review.sqlite3` to open a separate project.
+
+1. Enter a source name and paste text or choose a UTF-8 text file. Select **Save source version**.
+2. Select that source and add a card. Copy a passage that occurs exactly once, using **View latest source** to inspect the text.
+3. Save a revised source under the same name. Compare **Original passage** and **Latest candidate** in the review queue. You can try this with `examples/course-v1.txt` and `examples/course-v2.txt` using `red` as the anchor.
+4. Open **Review or edit card** to save edits and record a note for the displayed version. Lattice keeps prior card text and saved notes. Unsaved drafts stay in the current tab while you filter or save the other form. Save review notes before importing a new source version.
+5. Choose **Export evidence** to download a JSON copy of the source texts, cards, versions and history. Store it with the same care as the source material.
+
+The browser screen accepts plain text and limits each request to 2 MB. Use the CLI for basic HTML extraction.
 
 ## Try the CLI
 
-Requires Python 3.10 or newer. Run from this directory:
+Run these commands from this directory with a fresh database and an unused export path. If your Python command is `python3`, use it in place of `python`.
 
 ```sh
 python lattice.py --db demo.sqlite3 import course examples/course-v1.txt
@@ -20,15 +28,17 @@ python lattice.py --db demo.sqlite3 export evidence.json
 python -m unittest -v
 ```
 
-Use `python lattice.py --help` and subcommand `--help` for options. A source name identifies successive versions. Anchor text must occur exactly once in the latest version at creation. Each card currently has one edge; create multiple cards for multiple dependencies. Review notes acknowledge a specific latest version and do not move the original anchor or change the card. CLI export requires a new destination and refuses to overwrite an existing file, including the database. The JSON export contains the complete source texts, cards, edges, versions and review history: treat it as sensitive if your inputs are sensitive.
+Use `python lattice.py --help` and subcommand `--help` for options. A source name identifies successive versions. Anchor text must occur exactly once in the latest version at creation, counting overlaps. Each card has one anchor. Create separate cards for multiple dependencies. Review notes acknowledge a specific source version and preserve the original anchor and card text. CLI export requires an unused path and protects existing files, including the database. The JSON includes complete source texts, cards, edges, versions and review history.
 
 ## Interpretation and limitations
 
-`unchanged` means the exact quote occurs once in the latest source, or the entire source is unchanged. It does not prove the surrounding context or claim remains valid. `changed` is a tentative candidate bounded by unique nearby text; inspect it manually. `unresolvable` means relocation cannot be made conservatively. The heuristic can misidentify a candidate when unrelated text happens to form matching boundaries; a deleted quote or changed context may require manual review. No status establishes truth. Source versions, cards and notes remain in SQLite; use separate database files for separate projects. Concurrent edits, migration between schema versions, re-anchoring, JSON import are not yet supported. Use backups. HTML extraction is basic and may reorder or omit visual meaning. PDFs and OCR are not supported; manually extract text first. No crawler, search or automated source refresh is included. The browser UI is an early prototype and its rendered workflow has not been verified in the restricted development environment.
+`unchanged` means the exact quote occurs once in the latest source or the entire source is unchanged. Check surrounding context manually. `changed` is a tentative candidate between unique nearby text fragments. Unrelated text can form the same boundaries, so inspect the candidate. `unresolvable` means Lattice could not relocate the passage conservatively. Review a deleted, repeated, or relocated passage against the full source before updating a lesson.
 
-## Why explore this?
+Keep separate database files and backups for separate projects. The workflow excludes concurrent edits, migration between schema versions, re-anchoring and JSON import. Basic HTML extraction may omit visual meaning. Extract text separately from PDFs and scans. Source refresh is manual.
 
-[changedetection.io](https://github.com/dgtlmoon/changedetection.io) monitors changes; [Visualping](https://help.visualping.io/en/articles/14476033) provides hosted monitoring and alerts. Lattice explores an explicit passage-to-lesson review queue rather than monitoring. [StrictDoc](https://github.com/strictdoc-project/strictdoc) already offers requirements and documentation traceability and is a close alternative. Whether this smaller educator workflow is actually better remains unvalidated; this is not a uniqueness claim.
+## Related tools
+
+For web change monitoring, see [changedetection.io](https://github.com/dgtlmoon/changedetection.io) and [Visualping](https://help.visualping.io/en/articles/14476033). For requirements and documentation traceability, see [StrictDoc](https://github.com/strictdoc-project/strictdoc).
 
 ## License
 
